@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Webcord</title>
+
+<style>
+:root{
+  --bg:#1e1e2f; --sidebar:#252538; --accent:#4f8cff; --accent-active:#3672d0; --text:#fff;
+  --dm-bg:#2a2a3d; --input-bg:#2c2c40;
+}
+body{margin:0;font-family:Arial,sans-serif;display:flex;height:100vh;background:var(--bg);color:var(--text);}
+.sidebar{width:220px;background:var(--sidebar);display:flex;flex-direction:column;padding:15px;box-sizing:border-box;}
+.sidebar button{padding:12px;border:none;background:none;color:var(--text);text-align:left;cursor:pointer;border-radius:10px;margin:4px 0;}
+.sidebar button.active{background:var(--accent-active);}
+#dm-tabs{flex:1;overflow-y:auto;}
+#add-dm-container{margin-top:auto;}
+#add-dm-container input{width:120px;padding:6px;border-radius:8px;border:none;background:#1b1b2c;color:#fff;}
+#add-dm-container button{padding:6px 10px;border:none;border-radius:8px;background:var(--accent);color:#fff;margin-left:4px;}
+.main{flex:1;display:flex;flex-direction:column;}
+.chat-header{padding:15px;background:var(--sidebar);border-bottom:1px solid #444;font-weight:bold;}
+.chat-container{flex:1;overflow-y:auto;padding:15px;display:flex;flex-direction:column;}
+.message{display:flex;align-items:flex-start;margin:8px 0;max-width:70%;padding:10px 14px;border-radius:18px;}
+.message img{width:36px;height:36px;border-radius:50%;margin-right:10px;}
+.my-msg{background:linear-gradient(120deg,#4f8cff,#6eaaff);align-self:flex-end;}
+.dm-msg{background:var(--dm-bg);}
+.system-msg{background:#444;align-self:center;font-style:italic;}
+.input-area{display:flex;padding:12px;background:var(--input-bg);}
+.input-area input{flex:1;padding:12px;border-radius:16px;border:none;background:#1b1b2c;color:#fff;}
+.input-area button{padding:10px 16px;border:none;border-radius:16px;background:var(--accent);color:#fff;margin-left:8px;}
+
+/* ===== SETTINGS OVERLAY ===== */
+#settings{
+  position:fixed;
+  inset:0;
+  background:var(--bg);
+  display:none;
+  flex-direction:column;
+  padding:30px;
+  z-index:20;
+}
+#settings input{
+  padding:10px;
+  margin-bottom:12px;
+  border-radius:8px;
+  border:none;
+  background:#1b1b2c;
+  color:#fff;
+}
+</style>
+</head>
+
+<body>
+
+<div class="sidebar">
+  <div id="your-code">Your code: ---</div>
+  <div id="dm-tabs"></div>
+  <div id="add-dm-container">
+    <input id="dm-code-input" placeholder="Enter code" maxlength="3">
+    <button id="add-dm-btn">Join</button>
+  </div>
+  <button id="open-settings">⚙ Settings</button>
+</div>
+
+<div class="main">
+  <div class="chat-header" id="chat-header"></div>
+  <div class="chat-container" id="chat"></div>
+  <div class="input-area">
+    <input id="msg-input" placeholder="Type a message..." maxlength="200">
+    <button id="send-btn">Send</button>
+  </div>
+</div>
+
+<!-- SETTINGS -->
+<div id="settings">
+  <h2>Settings</h2>
+  <label>Username (max 10)</label>
+  <input id="name-input" maxlength="10">
+  <label>Profile Picture</label>
+  <input id="pic-input" type="file" accept="image/*">
+  <button id="save-settings">Save & Close</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.0/dist/peerjs.min.js"></script>
+<script>
+// ================= PROFILE =================
+let profile = JSON.parse(localStorage.getItem("profile")) || {
+  name:"User",
+  pic:"",
+  code:Math.floor(100+Math.random()*900)
+};
+localStorage.setItem("profile",JSON.stringify(profile));
+
+const defaultPFP =
+'data:image/svg+xml;base64,'+
+btoa('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="#777"/><circle cx="50" cy="35" r="20" fill="#fff"/><rect x="30" y="60" width="40" height="30" fill="#fff"/></svg>');
+
+document.getElementById("your-code").innerText = "Your code: " + profile.code;
+
+// ================= DOM =================
+const chat = document.getElementById("chat");
+const chatHeader = document.getElementById("chat-header");
+const dmTabs = document.getElementById("dm-tabs");
+const msgInput = document.getElementById("msg-input");
+
+let currentDM = "bot01";
+let dms = {};
+let dmInfo = {};
+let tabButtons = {};
+
+// ================= BOT =================
+const botText = `Welcome to Webcord! This is a peer-to-peer chat app for you and your friends. 
+Share your 3-digit code to open private DMs. Enter a friend’s code to chat with them. 
+DMs are direct browser-to-browser connections, meaning no servers store messages. 
+You can have multiple DMs open at once and switch between them using the sidebar. 
+Refreshing the page resets connections, but this bot will always be here to help.`;
+
+function renderBot(){
+  chat.innerHTML="";
+  renderMessage({text:botText},false,true);
+}
+
+// ================= UI =================
+function renderMessage(msg,isMe=false,system=false){
+  const d=document.createElement("div");
+  d.className="message "+(system?"system-msg":isMe?"my-msg":"dm-msg");
+  if(system) d.textContent=msg.text;
+  else d.innerHTML=`<img src="${msg.senderPic||defaultPFP}"><b>${msg.senderName}</b>: ${msg.text}`;
+  chat.appendChild(d);
+  chat.scrollTop=chat.scrollHeight;
+}
+
+function addTab(code,name){
+  if(tabButtons[code]) return;
+  const b=document.createElement("button");
+  b.textContent=name;
+  b.onclick=()=>switchDM(code);
+  dmTabs.appendChild(b);
+  tabButtons[code]=b;
+}
+
+function switchDM(code){
+  currentDM=code;
+  chat.innerHTML="";
+  Object.keys(tabButtons).forEach(c=>tabButtons[c].classList.toggle("active",c===code));
+  if(code==="bot01"){ chatHeader.textContent="Webcord Bot"; renderBot(); }
+  else chatHeader.textContent=dmInfo[code]?.name || code;
+}
+
+// ================= SEND =================
+document.getElementById("send-btn").onclick=()=>{
+  const text=msgInput.value.trim(); if(!text) return;
+  if(currentDM==="bot01") return;
+  const msg={type:"msg",text,senderName:profile.name,senderPic:profile.pic};
+  renderMessage(msg,true);
+  dms[currentDM].send(msg);
+  msgInput.value="";
+};
+
+// ================= WEBRTC =================
+const peer=new Peer(profile.code.toString());
+
+peer.on("connection",conn=>{
+  dms[conn.peer]=conn;
+  addTab(conn.peer,"Connecting...");
+  switchDM(conn.peer);
+
+  conn.on("open",()=>conn.send({type:"intro",name:profile.name,pic:profile.pic}));
+  conn.on("data",data=>{
+    if(data.type==="intro"){
+      dmInfo[conn.peer]=data;
+      tabButtons[conn.peer].textContent=data.name;
+      renderMessage({text:data.name+" joined the DM"},false,true);
+    }
+    if(data.type==="msg") renderMessage(data,false);
+  });
+});
+
+// ================= JOIN DM =================
+document.getElementById("add-dm-btn").onclick=()=>{
+  const code=document.getElementById("dm-code-input").value.trim();
+  if(!code||code==profile.code) return alert("Invalid code");
+  const conn=peer.connect(code);
+  dms[code]=conn;
+  addTab(code,"Connecting...");
+  switchDM(code);
+
+  conn.on("open",()=>conn.send({type:"intro",name:profile.name,pic:profile.pic}));
+  conn.on("data",data=>{
+    if(data.type==="intro"){
+      dmInfo[code]=data;
+      tabButtons[code].textContent=data.name;
+      renderMessage({text:data.name+" joined the DM"},false,true);
+    }
+    if(data.type==="msg") renderMessage(data,false);
+  });
+};
+
+// ================= SETTINGS =================
+document.getElementById("open-settings").onclick=()=>{
+  document.getElementById("name-input").value=profile.name;
+  document.getElementById("settings").style.display="flex";
+};
+
+document.getElementById("save-settings").onclick=()=>{
+  profile.name=document.getElementById("name-input").value||"User";
+  const file=document.getElementById("pic-input").files[0];
+  if(file){
+    const r=new FileReader();
+    r.onload=()=>{profile.pic=r.result;localStorage.setItem("profile",JSON.stringify(profile));};
+    r.readAsDataURL(file);
+  }else localStorage.setItem("profile",JSON.stringify(profile));
+  document.getElementById("settings").style.display="none";
+};
+
+// ================= INIT =================
+addTab("bot01","Webcord Bot");
+switchDM("bot01");
+</script>
+</body>
+</html>
